@@ -199,6 +199,13 @@ def draw_rectangle(x, y, width, height, color=1, filled=False):
                 set_pixel(x + px, y + py, color)
 
 
+def draw_bin(filename):
+    global buf_b, buf_r
+    with open(filename, "rb") as f:
+        buf_b = f.read(4250)
+        buf_r = f.read(4250)
+
+
 def clear():
     global buf_b, buf_r
     buf_b = bytearray(b'\xFF' * (COLS // 8) * ROWS)
