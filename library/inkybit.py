@@ -3,8 +3,8 @@ from micropython import const
 
 COLS = const(136)
 ROWS = const(250)
-OFFSET_X = 0
-OFFSET_Y = 6
+OFFSET_X = const(0)
+OFFSET_Y = const(6)
 
 WIDTH = const(250)
 HEIGHT = const(122)
@@ -48,8 +48,17 @@ spi_cs = pin8
 reset = pin2
 busy = pin16
 
-CS_ACTIVE = 0
-CS_INACTIVE = 0
+CS_ACTIVE = const(0)
+CS_INACTIVE = const(0)
+
+TEXT_TINY = const(1)
+TEXT_NORMAL = const(2)
+TEXT_MEDIUM = const(3)
+TEXT_LARGE = const(4)
+
+WHITE = const(0)
+BLACK = const(1)
+ACCENT = const(2)
 
 LUTS_BLACK = bytearray([
     0x02, 0x02, 0x01, 0x11, 0x12, 0x12, 0x22, 0x22, 0x66, 0x69,
@@ -70,27 +79,25 @@ def icon_format(text):
     return text.format(**replace)
 
 
-def char_len(char):
+def char_len(char, text_size=TEXT_NORMAL):
     if char in b"\"*+-0123<=>ABCDEFHKLOPQSUXZ[]^bcdefghjklnopqrsxz{":
-        return 4
+        return 4 * text_size
     if char in b"!'.:i|":
-        return 2
+        return 2 * text_size
     if char in b" (),;I`}":
-        return 3
-    return 5
+        return 3 * text_size
+    return 5 * text_size
 
 
-def text_len(text):
-    return sum(char_len(c) + 1 for c in text)
+def text_len(text, text_size=TEXT_NORMAL):
+    return sum(char_len(c, text_size=text_size) + text_size for c in text)
 
 
-def write(text, x, y, color=1, double=False):
+def write(text, x, y, color=1, text_size=TEXT_NORMAL):
     image = None
     for letter in text:
         image = None
-        letter_width = char_len(letter)
-        if double:
-            letter_width *= 2
+        letter_width = char_len(letter, text_size=text_size)
 
         if letter != " " and (x + letter_width) >= 1:
             if ord(letter) > 127:
@@ -102,31 +109,27 @@ def write(text, x, y, color=1, double=False):
                     pass
 
         if image is not None:
-            if not draw_icon(x, y, image, color, double=double):
+            if not draw_image(image, x, y, color, text_size=text_size):
                 return
 
-        x += letter_width + 1
+        x += letter_width + text_size
 
     del image
 
 
-def draw_icon(icon, x, y, color=1, double=False):
-    for ox in range(5):
+def draw_image(icon, x, y, color=1, text_size=TEXT_NORMAL):
+    cols = 5 * text_size
+    rows = 5 * text_size
+    for ox in range(cols):
         if x + ox < 0:
             continue
         if x + ox >= WIDTH:
             return False
-        for oy in range(5):
-            if not icon.get_pixel(ox, oy):
+        for oy in range(rows):
+            if not icon.get_pixel(ox // text_size, oy // text_size):
                 continue
             try:
-                if double:
-                    set_pixel(x + (ox * 2), y + (oy * 2), color)
-                    set_pixel(x + (ox * 2) + 1, y + (oy * 2), color)
-                    set_pixel(x + (ox * 2), y + (oy * 2) + 1, color)
-                    set_pixel(x + (ox * 2) + 1, y + (oy * 2) + 1, color)
-                else:
-                    set_pixel(ox + x, oy + y, color)
+                set_pixel(ox + x, oy + y, color)
             except IndexError:
                 pass
     return True
@@ -140,6 +143,9 @@ def set_pixel(x, y, color=1):
 
     offset = x * (COLS // 8) + y
 
+    if offset >= len(buf_b):
+        return
+
     byte_b = buf_b[offset] | (0b1 << shift)
     byte_r = buf_r[offset] & ~(0b1 << shift)
 
@@ -152,6 +158,45 @@ def set_pixel(x, y, color=1):
 
     buf_b[offset] = byte_b
     buf_r[offset] = byte_r
+
+
+def draw_line(x0, y0, x1, y1, color=1):
+    dx = abs(x1 - x0)
+    sx = 1 if x0 < x1 else -1
+    dy = -abs(y1 - y0)
+    sy = 1 if y0 < y1 else -1
+
+    err = dx + dy
+    while True:
+        set_pixel(x0, y0, color)
+        if x0 == x1 and y0 == y1:
+            break
+        e2 = 2 * err
+        if e2 > dy:
+            err += dy
+            x0 += sx
+        if e2 <= dx:
+            err += dx
+            y0 += sy
+
+
+def draw_rectangle(x, y, width, height, color=1, filled=False):
+    width -= 1
+    height -= 1
+
+    draw_line(x, y, x + width, y, color)
+    draw_line(x, y, x, y + height, color)
+    draw_line(x + width, y, x + width, y + height, color)
+    draw_line(x, y + height, x + width, y + height, color)
+
+    if filled:
+        x += 1
+        y += 1
+        width -= 1
+        height -= 1
+        for px in range(width):
+            for py in range(height):
+                set_pixel(x + px, y + py, color)
 
 
 def clear():
@@ -189,7 +234,6 @@ def _spi_data(data):
 
 
 def show():
-    clear()
     spi.init()
     reset.write_digital(0)
     sleep(500)
@@ -219,3 +263,6 @@ def show():
 
     _busy_wait()
     _spi_cmd(MASTER_ACTIVATE)
+
+
+clear()
